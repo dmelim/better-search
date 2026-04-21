@@ -15,3 +15,6 @@ build/windows/
 # IDE files
 .vscode/
 .idea/
+
+# Local notes
+TASKS.local.md
