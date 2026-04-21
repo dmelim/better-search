@@ -7,14 +7,13 @@ import {
   Folder,
   FolderOpen,
   LoaderCircle,
-  RefreshCw,
   Search,
   createIcons,
 } from 'lucide';
 import {
+  ImagePreview,
   OpenInVSCode,
   OpenPath,
-  Rescan,
   RevealPath,
   Search as SearchEntries,
   Status,
@@ -27,25 +26,74 @@ const lucideIcons = {
   Folder,
   FolderOpen,
   LoaderCircle,
-  RefreshCw,
   Search,
 };
 
 document.querySelector('#app').innerHTML = `
   <main class="shell">
     <section class="workspace">
-      <section class="surface">
-        <div class="query-panel">
-          <div class="querybar">
+      <section class="surface" id="surface">
+        <section class="search-stage" id="search-stage">
+          <div class="search-stage__topline">
             <label class="query-input" for="search-input">
               <span class="query-icon" data-lucide="search"></span>
               <span class="query-label">Search</span>
               <input id="search-input" class="search-input" type="text" autocomplete="off" spellcheck="false" placeholder="Type a file, folder, extension, or path fragment">
             </label>
-            <button class="rescan-button" id="rescan-btn" type="button">
-              <span data-lucide="refresh-cw"></span>
-              <span>Rescan</span>
-            </button>
+          </div>
+
+          <div class="search-stage__filters" id="filterbar">
+            <div class="filter-popover">
+              <button class="filter-trigger" id="scope-filter-trigger" type="button" data-filter-trigger="scope" aria-expanded="false">
+                <span>Scope</span>
+                <strong id="scope-filter-value">All drives</strong>
+              </button>
+              <div class="filter-panel" id="filter-panel-scope" data-filter-panel="scope">
+                <div class="filter-options filter-options-drives" id="drive-filters"></div>
+              </div>
+            </div>
+
+            <div class="filter-popover">
+              <button class="filter-trigger" id="type-filter-trigger" type="button" data-filter-trigger="type" aria-expanded="false">
+                <span>Type</span>
+                <strong id="type-filter-value">Both</strong>
+              </button>
+              <div class="filter-panel" id="filter-panel-type" data-filter-panel="type">
+                <div class="filter-toggle filter-toggle-segmented">
+                  <button class="filter-chip active" type="button" data-type-filter="all">Both</button>
+                  <button class="filter-chip" type="button" data-type-filter="files">Files</button>
+                  <button class="filter-chip" type="button" data-type-filter="folders">Folders</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="filter-popover filter-popover-field">
+              <button class="filter-trigger" id="path-filter-trigger" type="button" data-filter-trigger="path" aria-expanded="false">
+                <span>Path</span>
+                <strong id="path-filter-value">Any</strong>
+              </button>
+              <div class="filter-panel" id="filter-panel-path" data-filter-panel="path">
+                <label class="filter-field" for="folder-filter">
+                  <span class="filter-label">Path Focus</span>
+                  <input id="folder-filter" class="filter-text" type="text" autocomplete="off" spellcheck="false" placeholder="Optional folder path">
+                </label>
+              </div>
+            </div>
+
+            <div class="filter-popover filter-popover-field">
+              <button class="filter-trigger" id="extension-filter-trigger" type="button" data-filter-trigger="extension" aria-expanded="false">
+                <span>Ext</span>
+                <strong id="extension-filter-value">Any</strong>
+              </button>
+              <div class="filter-panel" id="filter-panel-extension" data-filter-panel="extension">
+                <label class="filter-field" for="extension-filter">
+                  <span class="filter-label">Extension</span>
+                  <input id="extension-filter" class="filter-text" type="text" autocomplete="off" spellcheck="false" placeholder=".pdf or js">
+                </label>
+              </div>
+            </div>
+
+            <button class="clear-filters-button" id="clear-filters-btn" type="button" hidden>Clear filters</button>
           </div>
 
           <section class="shortcut-strip" aria-label="Keyboard shortcuts">
@@ -56,41 +104,22 @@ document.querySelector('#app').innerHTML = `
               <p><kbd>Up/Down</kbd><span>Move through matches</span></p>
             </div>
           </section>
+        </section>
 
-          <div class="filterbar">
-            <div class="filter-group filter-group-wide">
-              <span class="filter-label">Scope</span>
-              <div class="filter-toggle filter-toggle-drives" id="drive-filters"></div>
-            </div>
-
-            <div class="filter-group">
-              <span class="filter-label">Type</span>
-              <div class="filter-toggle">
-                <button class="filter-chip active" type="button" data-type-filter="all">Both</button>
-                <button class="filter-chip" type="button" data-type-filter="files">Files</button>
-                <button class="filter-chip" type="button" data-type-filter="folders">Folders</button>
-              </div>
-            </div>
-
-            <label class="filter-field" for="folder-filter">
-              <span class="filter-label">Path Focus</span>
-              <input id="folder-filter" class="filter-text" type="text" autocomplete="off" spellcheck="false" placeholder="Optional folder path">
-            </label>
-
-            <label class="filter-field filter-field-compact" for="extension-filter">
-              <span class="filter-label">Extension</span>
-              <input id="extension-filter" class="filter-text" type="text" autocomplete="off" spellcheck="false" placeholder=".pdf or js">
-            </label>
-
-            <button class="clear-filters-button" id="clear-filters-btn" type="button">Clear filters</button>
-          </div>
+        <div class="post-search-empty" id="post-search-empty" hidden>
+          <p>Type to see matching files.</p>
         </div>
 
-        <div class="results-shell">
-          <div class="results-head">
-            <div>
+        <div class="results-shell" id="results-shell">
+          <div class="results-toolbar" id="results-toolbar">
+            <div class="results-toolbar__copy">
               <p class="section-label">Matches</p>
               <p class="results-note" id="results-note">Type to search the active index.</p>
+              <p class="results-filter-summary" id="results-filter-summary"></p>
+            </div>
+            <div class="view-toggle" aria-label="Result view">
+              <button class="view-toggle-button active" type="button" data-view-mode="list">List</button>
+              <button class="view-toggle-button" type="button" data-view-mode="mosaic">Mosaic</button>
             </div>
           </div>
           <div class="results-viewport">
@@ -108,31 +137,46 @@ const state = {
   drives: [],
   filters: {
     typeFilter: 'all',
+    scopeDrive: '',
     folderPrefix: '',
     extension: '',
   },
   status: null,
   results: [],
   selectedIndex: -1,
+  viewMode: 'list',
+  openFilter: null,
+  hasActivatedSearch: false,
   searchTimer: null,
   isSearching: false,
-  isRescanning: false,
 };
 
 const els = {
+  surface: document.getElementById('surface'),
   resultsNote: document.getElementById('results-note'),
+  resultsFilterSummary: document.getElementById('results-filter-summary'),
   results: document.getElementById('results'),
+  resultsShell: document.getElementById('results-shell'),
+  postSearchEmpty: document.getElementById('post-search-empty'),
   search: document.getElementById('search-input'),
+  filterbar: document.getElementById('filterbar'),
+  filterTriggers: Array.from(document.querySelectorAll('[data-filter-trigger]')),
+  filterPanels: Array.from(document.querySelectorAll('[data-filter-panel]')),
   folderFilter: document.getElementById('folder-filter'),
   extensionFilter: document.getElementById('extension-filter'),
+  scopeFilterValue: document.getElementById('scope-filter-value'),
+  typeFilterValue: document.getElementById('type-filter-value'),
+  pathFilterValue: document.getElementById('path-filter-value'),
+  extensionFilterValue: document.getElementById('extension-filter-value'),
   driveFilters: document.getElementById('drive-filters'),
   clearFilters: document.getElementById('clear-filters-btn'),
-  rescan: document.getElementById('rescan-btn'),
   flash: document.getElementById('flash'),
   typeFilters: Array.from(document.querySelectorAll('[data-type-filter]')),
+  viewModeButtons: Array.from(document.querySelectorAll('[data-view-mode]')),
 };
 
 const nf = new Intl.NumberFormat();
+const imagePreviewCache = new Map();
 const df = new Intl.DateTimeFormat(undefined, {
   year: 'numeric',
   month: 'short',
@@ -147,11 +191,17 @@ function init() {
   els.folderFilter.addEventListener('input', onFilterInput);
   els.extensionFilter.addEventListener('input', onFilterInput);
   els.clearFilters.addEventListener('click', onClearFilters);
-  els.rescan.addEventListener('click', onRescan);
+  els.filterTriggers.forEach((node) => {
+    node.addEventListener('click', onFilterTriggerClick);
+  });
   els.typeFilters.forEach((node) => {
     node.addEventListener('click', onTypeFilterClick);
   });
+  els.viewModeButtons.forEach((node) => {
+    node.addEventListener('click', onViewModeClick);
+  });
   document.addEventListener('keydown', onGlobalKeyDown);
+  document.addEventListener('click', onDocumentClick);
 
   refreshStatus();
   setInterval(refreshStatus, 1800);
@@ -171,6 +221,9 @@ async function refreshStatus() {
 
 function onSearchInput(event) {
   state.query = event.target.value.trim();
+  if (state.query) {
+    state.hasActivatedSearch = true;
+  }
   state.selectedIndex = -1;
   scheduleSearch();
 }
@@ -198,28 +251,62 @@ function onTypeFilterClick(event) {
   scheduleSearch();
 }
 
+function onFilterTriggerClick(event) {
+  const nextValue = event.currentTarget.dataset.filterTrigger || null;
+  state.openFilter = state.openFilter === nextValue ? null : nextValue;
+  render();
+
+  if (state.openFilter === 'path') {
+    els.folderFilter.focus();
+  } else if (state.openFilter === 'extension') {
+    els.extensionFilter.focus();
+  }
+}
+
 function onDriveFilterClick(event) {
   const nextValue = event.currentTarget.dataset.driveFilter || '';
-  if (state.filters.folderPrefix === nextValue) {
+  if (state.filters.scopeDrive === nextValue) {
     return;
   }
 
-  state.filters.folderPrefix = nextValue;
-  els.folderFilter.value = nextValue;
+  state.filters.scopeDrive = nextValue;
   state.selectedIndex = -1;
+  state.openFilter = null;
   scheduleSearch();
 }
 
 function onClearFilters() {
   state.filters = {
     typeFilter: 'all',
+    scopeDrive: '',
     folderPrefix: '',
     extension: '',
   };
   els.folderFilter.value = '';
   els.extensionFilter.value = '';
   state.selectedIndex = -1;
+  state.openFilter = null;
   scheduleSearch();
+}
+
+function onViewModeClick(event) {
+  const nextValue = event.currentTarget.dataset.viewMode || 'list';
+  if (state.viewMode === nextValue) {
+    return;
+  }
+
+  state.viewMode = nextValue;
+  render();
+  scrollSelectedIntoView();
+}
+
+function onDocumentClick(event) {
+  if (!state.openFilter || els.filterbar.contains(event.target)) {
+    return;
+  }
+
+  state.openFilter = null;
+  render();
 }
 
 function scheduleSearch() {
@@ -257,7 +344,7 @@ async function runSearch() {
       query: state.query,
       limit: 75,
       typeFilter: state.filters.typeFilter,
-      folderPrefix: state.filters.folderPrefix,
+      folderPrefix: getEffectiveFolderPrefix(),
       extension: state.filters.extension,
     });
     state.selectedIndex = state.results.length ? 0 : -1;
@@ -265,27 +352,6 @@ async function runSearch() {
     flash('Search failed.');
   } finally {
     state.isSearching = false;
-    render();
-  }
-}
-
-async function onRescan() {
-  try {
-    state.isRescanning = true;
-    render();
-    await Rescan();
-    await refreshStatus();
-
-    if (state.query) {
-      await runSearch();
-    } else {
-      state.results = [];
-      state.selectedIndex = -1;
-    }
-  } catch (error) {
-    flash('Rescan could not be started.');
-  } finally {
-    state.isRescanning = false;
     render();
   }
 }
@@ -334,6 +400,12 @@ function onInputKeyDown(event) {
 }
 
 function onGlobalKeyDown(event) {
+  if (event.key === 'Escape' && state.openFilter) {
+    state.openFilter = null;
+    render();
+    return;
+  }
+
   if (event.key === '/') {
     const tag = document.activeElement?.tagName;
     if (tag !== 'INPUT' && tag !== 'TEXTAREA') {
@@ -345,9 +417,22 @@ function onGlobalKeyDown(event) {
 }
 
 function render() {
+  renderSearchVisibility();
   renderFilterControls();
+  renderFilterPanels();
+  renderResultsToolbar();
   renderResults();
   renderIcons();
+  hydrateImagePreviews();
+}
+
+function renderSearchVisibility() {
+  const hasQuery = Boolean(state.query);
+  const isInitialIdle = !hasQuery && !state.hasActivatedSearch;
+  els.surface.classList.toggle('is-idle', isInitialIdle);
+  els.surface.classList.toggle('is-active', !isInitialIdle);
+  els.postSearchEmpty.hidden = hasQuery || isInitialIdle;
+  els.resultsShell.hidden = !hasQuery;
 }
 
 function renderFilterControls() {
@@ -356,7 +441,33 @@ function renderFilterControls() {
   });
 
   renderDriveFilters();
-  els.clearFilters.disabled = !hasActiveFilters();
+  els.clearFilters.hidden = !hasActiveFilters();
+  els.scopeFilterValue.textContent = formatScopeValue();
+  els.typeFilterValue.textContent = formatTypeValue();
+  els.pathFilterValue.textContent = state.filters.folderPrefix ? compactPath(state.filters.folderPrefix) : 'Any';
+  els.extensionFilterValue.textContent = state.filters.extension ? formatExtension(state.filters.extension) : 'Any';
+
+  els.filterTriggers.forEach((node) => {
+    const filterName = node.dataset.filterTrigger;
+    node.classList.toggle('is-open', state.openFilter === filterName);
+    node.classList.toggle('is-active', isFilterActive(filterName));
+    node.setAttribute('aria-expanded', String(state.openFilter === filterName));
+  });
+}
+
+function renderFilterPanels() {
+  els.filterPanels.forEach((node) => {
+    node.hidden = node.dataset.filterPanel !== state.openFilter;
+  });
+}
+
+function renderResultsToolbar() {
+  const filterSummary = describeActiveFilters();
+
+  els.resultsFilterSummary.textContent = filterSummary ? `Filtered by ${filterSummary}.` : '';
+  els.viewModeButtons.forEach((node) => {
+    node.classList.toggle('active', node.dataset.viewMode === state.viewMode);
+  });
 }
 
 function renderDriveFilters() {
@@ -379,20 +490,12 @@ function renderDriveFilters() {
 
 function renderResults() {
   const filterSuffix = formatFilterSuffix();
+  els.results.classList.toggle('is-list', state.viewMode === 'list');
+  els.results.classList.toggle('is-mosaic', state.viewMode === 'mosaic');
 
   if (!state.query) {
-    els.resultsNote.textContent = filterSuffix
-      ? `Type to search everywhere${filterSuffix}.`
-      : 'Type to search everywhere.';
-    els.results.innerHTML = `
-      <div class="empty">
-        <h3 class="empty-title">One search field. One result stream.</h3>
-        <p class="empty-copy">${escapeHtml(filterSuffix
-          ? `Filters are ready. Add a query to search${filterSuffix}.`
-          : 'Search stays global by default. Use drive chips only when you want to focus the scan.'
-        )}</p>
-      </div>
-    `;
+    els.resultsNote.textContent = 'Type to search everywhere.';
+    els.results.innerHTML = '';
     return;
   }
 
@@ -426,6 +529,15 @@ function renderResults() {
   }
 
   els.resultsNote.textContent = `${nf.format(state.results.length)} matches for "${state.query}"${filterSuffix}`;
+
+  if (state.viewMode === 'mosaic') {
+    renderMosaicResults();
+  } else {
+    renderListResults();
+  }
+}
+
+function renderListResults() {
   els.results.innerHTML = state.results.map((item, index) => {
     const meta = [
       item.isDir ? 'Folder' : formatBytes(item.size),
@@ -434,9 +546,7 @@ function renderResults() {
 
     return `
       <article class="result ${index === state.selectedIndex ? 'active' : ''}" data-index="${index}">
-        <div class="result-icon">
-          <span data-lucide="${item.isDir ? 'folder' : 'file'}"></span>
-        </div>
+        ${renderResultMedia(item, 'result-icon')}
         <div class="result-main">
           <button class="result-name" type="button" data-open="${escapeAttr(item.path)}">${escapeHtml(item.name)}</button>
           <p class="result-path">${escapeHtml(item.path)}</p>
@@ -457,6 +567,46 @@ function renderResults() {
     `;
   }).join('');
 
+  bindResultActions();
+}
+
+function renderMosaicResults() {
+  els.results.innerHTML = state.results.map((item, index) => {
+    const meta = [
+      item.isDir ? 'Folder' : formatBytes(item.size),
+      item.modTime ? df.format(new Date(item.modTime)) : 'Unknown time',
+    ].join(' | ');
+
+    return `
+      <article class="result-tile ${index === state.selectedIndex ? 'active' : ''}" data-index="${index}">
+        <button class="result-tile-main ${isImageResult(item) ? 'has-image-media' : ''}" type="button" data-open="${escapeAttr(item.path)}">
+          ${isImageResult(item) ? renderResultMedia(item, 'result-tile-icon', 'span') : ''}
+          <span class="result-tile-title">
+            ${isImageResult(item) ? '' : renderResultMedia(item, 'result-tile-icon', 'span')}
+            <span class="result-tile-name">${escapeHtml(item.name)}</span>
+          </span>
+          <span class="result-tile-path">${escapeHtml(shortenPath(item.path))}</span>
+          <span class="result-tile-meta">${escapeHtml(meta)}</span>
+        </button>
+        <div class="result-tile-actions">
+          <button class="icon-button" type="button" title="Open item" data-open="${escapeAttr(item.path)}">
+            <span data-lucide="external-link"></span>
+          </button>
+          <button class="icon-button" type="button" title="Open in VS Code" data-vscode="${escapeAttr(item.path)}">
+            <span data-lucide="code-xml"></span>
+          </button>
+          <button class="icon-button" type="button" title="Reveal in Explorer" data-reveal="${escapeAttr(item.path)}">
+            <span data-lucide="folder-open"></span>
+          </button>
+        </div>
+      </article>
+    `;
+  }).join('');
+
+  bindResultActions();
+}
+
+function bindResultActions() {
   els.results.querySelectorAll('[data-open]').forEach((node) => {
     node.addEventListener('click', () => openPath(node.dataset.open));
   });
@@ -468,6 +618,62 @@ function renderResults() {
   els.results.querySelectorAll('[data-vscode]').forEach((node) => {
     node.addEventListener('click', () => openInVSCode(node.dataset.vscode));
   });
+}
+
+function renderResultMedia(item, className, tagName = 'div') {
+  const iconName = item.isDir ? 'folder' : 'file';
+
+  if (!isImageResult(item)) {
+    return `
+      <${tagName} class="${className}">
+        <span data-lucide="${iconName}"></span>
+      </${tagName}>
+    `;
+  }
+
+  return `
+    <${tagName} class="${className} image-preview" data-preview-path="${escapeAttr(item.path)}">
+      <span class="image-preview-fallback" data-lucide="${iconName}"></span>
+    </${tagName}>
+  `;
+}
+
+function hydrateImagePreviews() {
+  els.results.querySelectorAll('[data-preview-path]').forEach((node) => {
+    const path = node.dataset.previewPath;
+    if (!path) {
+      return;
+    }
+
+    loadImagePreview(path).then((dataUrl) => {
+      if (!dataUrl || node.dataset.previewPath !== path) {
+        return;
+      }
+
+      node.innerHTML = `<img src="${escapeAttr(dataUrl)}" alt="">`;
+      node.classList.add('has-preview');
+    });
+  });
+}
+
+function loadImagePreview(path) {
+  if (imagePreviewCache.has(path)) {
+    const cached = imagePreviewCache.get(path);
+    return cached instanceof Promise ? cached : Promise.resolve(cached);
+  }
+
+  const request = ImagePreview(path)
+    .then((dataUrl) => {
+      imagePreviewCache.set(path, dataUrl || '');
+      return dataUrl || '';
+    })
+    .catch(() => {
+      imagePreviewCache.set(path, '');
+      return '';
+    });
+
+  imagePreviewCache.set(path, request);
+  return request;
 }
 
 function renderIcons() {
@@ -486,12 +692,35 @@ function renderIcons() {
 }
 
 function scrollSelectedIntoView() {
-  const node = els.results.querySelector(`.result[data-index="${state.selectedIndex}"]`);
+  const node = els.results.querySelector(`.result[data-index="${state.selectedIndex}"], .result-tile[data-index="${state.selectedIndex}"]`);
   node?.scrollIntoView({block: 'nearest'});
 }
 
 function hasActiveFilters() {
-  return state.filters.typeFilter !== 'all' || Boolean(state.filters.folderPrefix) || Boolean(state.filters.extension);
+  return state.filters.typeFilter !== 'all'
+    || Boolean(state.filters.scopeDrive)
+    || Boolean(state.filters.folderPrefix)
+    || Boolean(state.filters.extension);
+}
+
+function isFilterActive(filterName) {
+  if (filterName === 'scope') {
+    return Boolean(state.filters.scopeDrive);
+  }
+
+  if (filterName === 'path') {
+    return Boolean(state.filters.folderPrefix);
+  }
+
+  if (filterName === 'type') {
+    return state.filters.typeFilter !== 'all';
+  }
+
+  if (filterName === 'extension') {
+    return Boolean(state.filters.extension);
+  }
+
+  return false;
 }
 
 function describeActiveFilters() {
@@ -505,6 +734,8 @@ function describeActiveFilters() {
 
   if (state.filters.folderPrefix) {
     parts.push(formatScopeLabel(state.filters.folderPrefix));
+  } else if (state.filters.scopeDrive) {
+    parts.push(formatScopeLabel(state.filters.scopeDrive));
   }
 
   if (state.filters.extension) {
@@ -512,6 +743,26 @@ function describeActiveFilters() {
   }
 
   return parts.join(', ');
+}
+
+function formatScopeValue() {
+  if (!state.filters.scopeDrive) {
+    return 'All drives';
+  }
+
+  return state.filters.scopeDrive;
+}
+
+function formatTypeValue() {
+  if (state.filters.typeFilter === 'files') {
+    return 'Files';
+  }
+
+  if (state.filters.typeFilter === 'folders') {
+    return 'Folders';
+  }
+
+  return 'Both';
 }
 
 function formatFilterSuffix() {
@@ -565,10 +816,10 @@ function extractDriveRoot(path) {
 
 function isDriveActive(drive) {
   if (!drive) {
-    return !state.filters.folderPrefix;
+    return !state.filters.scopeDrive;
   }
 
-  return isPathWithinDrive(state.filters.folderPrefix, drive);
+  return isPathWithinDrive(state.filters.scopeDrive, drive);
 }
 
 function isPathWithinDrive(path, drive) {
@@ -581,6 +832,41 @@ function isPathWithinDrive(path, drive) {
 
 function isDriveRoot(path) {
   return /^[A-Za-z]:\\$/.test(String(path));
+}
+
+function isImageResult(item) {
+  if (item.isDir) {
+    return false;
+  }
+
+  return isImageExtension(item.ext || item.path);
+}
+
+function isImageExtension(value) {
+  return ['.apng', '.avif', '.bmp', '.gif', '.ico', '.jpg', '.jpeg', '.png', '.svg', '.webp']
+    .includes(String(value).toLowerCase().replace(/^.*(\.[^.\\/]+)$/, '$1'));
+}
+
+function getEffectiveFolderPrefix() {
+  return state.filters.folderPrefix || state.filters.scopeDrive;
+}
+
+function compactPath(path) {
+  const value = String(path);
+  if (value.length <= 22) {
+    return value;
+  }
+
+  return `...${value.slice(-19)}`;
+}
+
+function shortenPath(path) {
+  const parts = String(path).split(/[\\/]+/).filter(Boolean);
+  if (parts.length <= 3) {
+    return String(path);
+  }
+
+  return `${parts[0]}\\...\\${parts.slice(-2).join('\\')}`;
 }
 
 function formatBytes(value) {
