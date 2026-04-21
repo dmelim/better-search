@@ -1,0 +1,17 @@
+.DS_Store
+Thumbs.db
+
+# Node/Vite
+frontend/node_modules/
+frontend/dist/
+
+# Wails build artifacts
+build/bin/
+build/windows/
+
+# Logs
+*.log
+
+# IDE files
+.vscode/
+.idea/
