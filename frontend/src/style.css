@@ -9,7 +9,8 @@
   --warm-soft: rgba(213, 152, 96, 0.16);
   --shadow: 0 30px 70px rgba(0, 0, 0, 0.32);
   --font-ui: "Segoe UI Variable Text", "Aptos", "Segoe UI", sans-serif;
-  --font-display: "Bahnschrift", "Segoe UI Variable Display", "Aptos Display", sans-serif;
+  --font-display:
+    "Bahnschrift", "Segoe UI Variable Display", "Aptos Display", sans-serif;
 }
 
 * {
@@ -28,7 +29,18 @@ body,
 }
 
 body {
-  background: linear-gradient(180deg, var(--bg-top) 0%, var(--bg-bottom) 100%);
+  background: linear-gradient(
+    160deg,
+    var(--bg-top) 0%,
+    var(--bg-bottom) 48%,
+    #2f6f61 100%
+  );
+  background: linear-gradient(
+    160deg,
+    var(--bg-top) 0%,
+    var(--bg-bottom) 48%,
+    color-mix(in srgb, var(--accent) 15%, var(--bg-bottom)) 100%
+  );
   color: var(--text);
   font-family: var(--font-ui);
   overflow: hidden;
@@ -45,7 +57,7 @@ input {
   padding: 18px 20px 20px;
   opacity: 0;
   transform: translateY(14px);
-  animation: load-in 520ms cubic-bezier(.2, .7, .2, 1) forwards;
+  animation: load-in 520ms cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
 }
 
 .eyebrow,
@@ -96,7 +108,9 @@ kbd {
   margin: 0 auto;
   display: grid;
   gap: 14px;
-  transition: transform 260ms cubic-bezier(.2, .7, .2, 1), max-width 260ms ease;
+  transition:
+    transform 260ms cubic-bezier(0.2, 0.7, 0.2, 1),
+    max-width 260ms ease;
 }
 
 .surface.is-idle .search-stage {
@@ -117,7 +131,11 @@ kbd {
   border-radius: 28px;
   background: rgba(255, 255, 255, 0.055);
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.22);
-  transition: border-color 160ms ease, background 160ms ease, box-shadow 200ms ease, transform 200ms ease;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    box-shadow 200ms ease,
+    transform 200ms ease;
 }
 
 .query-input:focus-within {
@@ -155,7 +173,9 @@ kbd {
   font-weight: 600;
   letter-spacing: 0;
   outline: none;
-  transition: font-size 220ms ease, padding 220ms ease;
+  transition:
+    font-size 220ms ease,
+    padding 220ms ease;
 }
 
 .search-input:focus {
@@ -228,7 +248,10 @@ kbd {
   background: rgba(255, 255, 255, 0.06);
   color: var(--muted);
   cursor: pointer;
-  transition: color 140ms ease, background 140ms ease, transform 140ms ease;
+  transition:
+    color 140ms ease,
+    background 140ms ease,
+    transform 140ms ease;
 }
 
 .filter-trigger {
@@ -306,7 +329,10 @@ kbd {
   background: transparent;
   color: var(--muted);
   cursor: pointer;
-  transition: color 140ms ease, background 140ms ease, transform 140ms ease;
+  transition:
+    color 140ms ease,
+    background 140ms ease,
+    transform 140ms ease;
 }
 
 .filter-chip:hover {
@@ -342,7 +368,9 @@ kbd {
   background: rgba(255, 255, 255, 0.06);
   color: var(--text);
   outline: none;
-  transition: border-color 140ms ease, background 140ms ease;
+  transition:
+    border-color 140ms ease,
+    background 140ms ease;
 }
 
 .filter-text:focus {
@@ -421,7 +449,9 @@ kbd {
   background: transparent;
   color: var(--muted);
   cursor: pointer;
-  transition: color 140ms ease, background 140ms ease;
+  transition:
+    color 140ms ease,
+    background 140ms ease;
 }
 
 .view-toggle-button:hover,
@@ -443,7 +473,9 @@ kbd {
   scrollbar-gutter: stable;
   scrollbar-width: thin;
   scrollbar-color: rgba(149, 168, 188, 0.7) transparent;
-  transition: opacity 140ms ease, transform 140ms ease;
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
 }
 
 .results.is-list {
@@ -488,7 +520,9 @@ kbd {
   padding: 14px 16px;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.03);
-  transition: background 140ms ease, transform 140ms ease;
+  transition:
+    background 140ms ease,
+    transform 140ms ease;
 }
 
 .result:hover,
@@ -564,7 +598,9 @@ kbd {
   background: transparent;
   color: var(--muted);
   cursor: pointer;
-  transition: color 140ms ease, background 140ms ease;
+  transition:
+    color 140ms ease,
+    background 140ms ease;
 }
 
 .icon-button:hover {
@@ -577,7 +613,9 @@ kbd {
   min-width: 0;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.035);
-  transition: background 140ms ease, transform 140ms ease;
+  transition:
+    background 140ms ease,
+    transform 140ms ease;
 }
 
 .result-tile:hover,
@@ -692,7 +730,9 @@ kbd {
   gap: 4px;
   opacity: 0;
   transform: translateY(-2px);
-  transition: opacity 140ms ease, transform 140ms ease;
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
 }
 
 .result-tile:hover .result-tile-actions,
@@ -742,7 +782,9 @@ kbd {
   opacity: 0;
   transform: translateY(8px);
   pointer-events: none;
-  transition: opacity 160ms ease, transform 160ms ease;
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease;
 }
 
 .flash.visible {

@@ -6,13 +6,22 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 )
 
-const liveSearchDepth = 2
+const liveSearchDepth = 4
+const indexProgressLogFile = "indexing_progress.log"
+const indexProgressLogStep = 100
+
+const (
+	entryStateActive  = "active"
+	entryStateStale   = "stale"
+	entryStateMissing = "missing"
+)
 
 type Entry struct {
 	Path    string    `json:"path"`
@@ -36,6 +45,7 @@ type Status struct {
 
 type Manager struct {
 	roots []string
+	store string
 
 	entriesMu sync.Mutex
 	entries   []indexedEntry
@@ -50,12 +60,18 @@ type Manager struct {
 	indexedFiles atomic.Int64
 	indexedDirs  atomic.Int64
 	errorCount   atomic.Int64
+
+	discoveredItems      atomic.Int64
+	progressLoggedItems  atomic.Int64
+	progressLogWriteLock sync.Mutex
 }
 
 type indexedEntry struct {
 	Entry
 	nameLower string
 	pathLower string
+	state     string
+	seenScan  uint64
 }
 
 type scoredEntry struct {
@@ -64,9 +80,12 @@ type scoredEntry struct {
 }
 
 func NewManager(roots []string) *Manager {
-	return &Manager{
+	manager := &Manager{
 		roots: append([]string(nil), roots...),
+		store: defaultIndexStorePath(),
 	}
+	manager.loadPersistedIndex()
+	return manager
 }
 
 func (m *Manager) Start() {
@@ -146,10 +165,12 @@ func (m *Manager) Search(request SearchRequest) []Entry {
 	}
 
 	status := m.Status()
-	if status.State != "ready" || len(out) == 0 {
+	if len(out) == 0 && status.State != "scanning" {
 		out = mergeEntries(out, m.searchLive(search), search.limit)
 	}
 
+	out = uniqueEntries(out, search.limit)
+	out = m.hydrateAndPruneMissing(out)
 	return out
 }
 
@@ -177,13 +198,13 @@ func (m *Manager) startScan() {
 	m.cancelScan = cancel
 
 	scanID := m.scanID.Add(1)
-	m.entriesMu.Lock()
-	m.entries = nil
-	m.entriesMu.Unlock()
 
 	m.indexedFiles.Store(0)
 	m.indexedDirs.Store(0)
 	m.errorCount.Store(0)
+	m.discoveredItems.Store(0)
+	m.progressLoggedItems.Store(0)
+	m.resetProgressLog()
 
 	now := time.Now()
 	m.statusMu.Lock()
@@ -200,8 +221,7 @@ func (m *Manager) startScan() {
 
 func (m *Manager) scan(ctx context.Context, scanID uint64) {
 	workerCount := max(runtime.GOMAXPROCS(0)*4, 8)
-	dirs := make(chan string, workerCount*4)
-	var pending sync.WaitGroup
+	dirs := newScanDirQueue(ctx)
 	var workers sync.WaitGroup
 	var visited sync.Map
 
@@ -216,14 +236,11 @@ func (m *Manager) scan(ctx context.Context, scanID uint64) {
 			return false
 		}
 
-		pending.Add(1)
-		select {
-		case dirs <- path:
-			return true
-		case <-ctx.Done():
-			pending.Done()
-			return false
-		}
+		return dirs.push(path)
+	}
+
+	for _, root := range m.roots {
+		enqueue(filepath.Clean(root))
 	}
 
 	for i := 0; i < workerCount; i++ {
@@ -239,17 +256,23 @@ func (m *Manager) scan(ctx context.Context, scanID uint64) {
 				m.appendBatch(scanID, batch)
 				batch = make([]indexedEntry, 0, 256)
 			}
+			defer flush()
 
-			for dir := range dirs {
+			for {
+				dir, ok := dirs.pop()
+				if !ok {
+					return
+				}
+
 				if ctx.Err() != nil {
-					pending.Done()
+					dirs.done()
 					continue
 				}
 
 				dirEntries, err := os.ReadDir(dir)
 				if err != nil {
 					m.errorCount.Add(1)
-					pending.Done()
+					dirs.done()
 					continue
 				}
 
@@ -262,25 +285,22 @@ func (m *Manager) scan(ctx context.Context, scanID uint64) {
 					fullPath := filepath.Join(dir, name)
 					isDir := entry.IsDir()
 
-					info, infoErr := entry.Info()
-					if infoErr != nil {
-						m.errorCount.Add(1)
-						continue
-					}
-
 					item := indexedEntry{
 						Entry: Entry{
-							Path:    fullPath,
-							Name:    name,
-							Dir:     dir,
-							Ext:     strings.ToLower(filepath.Ext(name)),
-							IsDir:   isDir,
-							Size:    info.Size(),
-							ModTime: info.ModTime(),
+							Path:  fullPath,
+							Name:  name,
+							Dir:   dir,
+							Ext:   strings.ToLower(filepath.Ext(name)),
+							IsDir: isDir,
 						},
 						nameLower: normalize(name),
 						pathLower: normalize(fullPath),
+						state:     entryStateActive,
+						seenScan:  scanID,
 					}
+
+					discovered := m.discoveredItems.Add(1)
+					m.logIndexProgress(scanID, discovered, false)
 
 					batch = append(batch, item)
 					if len(batch) >= cap(batch) {
@@ -299,39 +319,228 @@ func (m *Manager) scan(ctx context.Context, scanID uint64) {
 					m.indexedFiles.Add(1)
 				}
 
-				pending.Done()
+				dirs.done()
 			}
-
-			flush()
 		}()
 	}
 
-	for _, root := range m.roots {
-		enqueue(filepath.Clean(root))
-	}
-
-	go func() {
-		pending.Wait()
-		close(dirs)
-	}()
-
 	workers.Wait()
+	dirs.close()
 
 	m.statusMu.Lock()
-	defer m.statusMu.Unlock()
 
 	if scanID != m.scanID.Load() {
+		m.statusMu.Unlock()
 		return
 	}
 
 	if ctx.Err() != nil {
 		m.status.State = "cancelled"
 		m.status.CompletedAt = time.Now()
+		m.statusMu.Unlock()
+		m.logIndexProgress(scanID, m.discoveredItems.Load(), true)
 		return
 	}
 
 	m.status.State = "ready"
 	m.status.CompletedAt = time.Now()
+	m.statusMu.Unlock()
+
+	m.logIndexProgress(scanID, m.discoveredItems.Load(), true)
+	m.compactAndPersistIndex()
+}
+
+type scanDirQueue struct {
+	ctx    context.Context
+	mu     sync.Mutex
+	cond   *sync.Cond
+	jobs   []string
+	head   int
+	active int
+	closed bool
+	stop   chan struct{}
+	once   sync.Once
+}
+
+func newScanDirQueue(ctx context.Context) *scanDirQueue {
+	q := &scanDirQueue{
+		ctx:  ctx,
+		jobs: make([]string, 0, 1024),
+		stop: make(chan struct{}),
+	}
+	q.cond = sync.NewCond(&q.mu)
+
+	go func() {
+		select {
+		case <-ctx.Done():
+			q.close()
+		case <-q.stop:
+		}
+	}()
+
+	return q
+}
+
+func (q *scanDirQueue) push(path string) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	if q.closed || q.ctx.Err() != nil {
+		return false
+	}
+
+	q.jobs = append(q.jobs, path)
+	q.cond.Signal()
+	return true
+}
+
+func (q *scanDirQueue) pop() (string, bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	for {
+		if q.closed || q.ctx.Err() != nil {
+			return "", false
+		}
+
+		if q.head < len(q.jobs) {
+			path := q.jobs[q.head]
+			q.jobs[q.head] = ""
+			q.head++
+			q.active++
+
+			if q.head > 4096 && q.head*2 >= len(q.jobs) {
+				q.jobs = append([]string(nil), q.jobs[q.head:]...)
+				q.head = 0
+			}
+
+			return path, true
+		}
+
+		if q.active == 0 {
+			q.closed = true
+			q.cond.Broadcast()
+			return "", false
+		}
+
+		q.cond.Wait()
+	}
+}
+
+func (q *scanDirQueue) done() {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	if q.active > 0 {
+		q.active--
+	}
+	if q.active == 0 && q.head >= len(q.jobs) {
+		q.closed = true
+		q.cond.Broadcast()
+		return
+	}
+	q.cond.Signal()
+}
+
+func (q *scanDirQueue) close() {
+	q.once.Do(func() {
+		close(q.stop)
+		q.mu.Lock()
+		q.closed = true
+		q.cond.Broadcast()
+		q.mu.Unlock()
+	})
+}
+
+func defaultIndexStorePath() string {
+	base, err := os.UserCacheDir()
+	if err != nil || base == "" {
+		return "better-search-index.db"
+	}
+	return filepath.Join(base, "better-search", "index.db")
+}
+
+func (m *Manager) loadPersistedIndex() {
+	if m.store == "" {
+		return
+	}
+
+	entries, lastScan, err := loadSQLiteIndex(m.store)
+	if err != nil {
+		return
+	}
+	m.scanID.Store(lastScan)
+
+	m.entriesMu.Lock()
+	m.entries = entries
+	m.entriesMu.Unlock()
+}
+
+func (m *Manager) compactAndPersistIndex() {
+	scanID := m.scanID.Load()
+
+	m.entriesMu.Lock()
+	latest := make(map[string]indexedEntry, len(m.entries))
+	for _, entry := range m.entries {
+		key := strings.ToLower(filepath.Clean(entry.Path))
+		current, exists := latest[key]
+		if !exists || entry.seenScan >= current.seenScan {
+			latest[key] = entry
+		}
+	}
+
+	compact := make([]indexedEntry, 0, len(latest))
+	for _, entry := range latest {
+		if entry.seenScan == scanID {
+			entry.state = entryStateActive
+		} else if entry.state == "" || entry.state == entryStateActive {
+			entry.state = entryStateStale
+		}
+		compact = append(compact, entry)
+	}
+	sort.Slice(compact, func(i, j int) bool {
+		return strings.ToLower(compact[i].Path) < strings.ToLower(compact[j].Path)
+	})
+	m.entries = compact
+	m.entriesMu.Unlock()
+
+	if m.store == "" {
+		return
+	}
+
+	_ = saveSQLiteIndex(m.store, compact, scanID)
+}
+
+func (m *Manager) resetProgressLog() {
+	_ = os.WriteFile(indexProgressLogFile, nil, 0o644)
+}
+
+func (m *Manager) logIndexProgress(scanID uint64, count int64, force bool) {
+	if scanID != m.scanID.Load() || count <= 0 {
+		return
+	}
+	if !force && count%indexProgressLogStep != 0 {
+		return
+	}
+
+	m.progressLogWriteLock.Lock()
+	defer m.progressLogWriteLock.Unlock()
+
+	if scanID != m.scanID.Load() || count <= m.progressLoggedItems.Load() {
+		return
+	}
+
+	line := time.Now().Format(time.RFC3339) + ": " + strconv.FormatInt(count, 10) + "\n"
+	file, err := os.OpenFile(indexProgressLogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+
+	if _, err := file.WriteString(line); err != nil {
+		return
+	}
+	m.progressLoggedItems.Store(count)
 }
 
 func (m *Manager) appendBatch(scanID uint64, batch []indexedEntry) {
@@ -347,7 +556,7 @@ func (m *Manager) appendBatch(scanID uint64, batch []indexedEntry) {
 
 func (m *Manager) snapshotEntries() []indexedEntry {
 	m.entriesMu.Lock()
-	entries := m.entries
+	entries := append([]indexedEntry(nil), m.entries...)
 	m.entriesMu.Unlock()
 	return entries
 }
@@ -462,6 +671,77 @@ func mergeEntries(primary, secondary []Entry, limit int) []Entry {
 	}
 
 	return out
+}
+
+func uniqueEntries(entries []Entry, limit int) []Entry {
+	if limit <= 0 {
+		limit = 50
+	}
+
+	seen := make(map[string]struct{}, min(limit, len(entries)))
+	out := make([]Entry, 0, min(limit, len(entries)))
+	for _, entry := range entries {
+		key := strings.ToLower(filepath.Clean(entry.Path))
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, entry)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out
+}
+
+func (m *Manager) hydrateAndPruneMissing(entries []Entry) []Entry {
+	missingPaths := make([]string, 0)
+	out := entries[:0]
+
+	for i := range entries {
+		info, err := os.Stat(entries[i].Path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				missingPaths = append(missingPaths, entries[i].Path)
+				continue
+			}
+			out = append(out, entries[i])
+			continue
+		}
+		entries[i].IsDir = info.IsDir()
+		entries[i].Size = info.Size()
+		entries[i].ModTime = info.ModTime()
+		out = append(out, entries[i])
+	}
+
+	if len(missingPaths) > 0 {
+		m.removeIndexedPaths(missingPaths)
+		if m.store != "" {
+			_ = markSQLitePathsState(m.store, missingPaths, entryStateMissing)
+		}
+	}
+
+	return out
+}
+
+func (m *Manager) removeIndexedPaths(paths []string) {
+	missing := make(map[string]struct{}, len(paths))
+	for _, path := range paths {
+		missing[strings.ToLower(filepath.Clean(path))] = struct{}{}
+	}
+
+	m.entriesMu.Lock()
+	defer m.entriesMu.Unlock()
+
+	kept := m.entries[:0]
+	for _, entry := range m.entries {
+		key := strings.ToLower(filepath.Clean(entry.Path))
+		if _, remove := missing[key]; remove {
+			continue
+		}
+		kept = append(kept, entry)
+	}
+	m.entries = kept
 }
 
 func appendScored(items []scoredEntry, candidate scoredEntry, limit int) []scoredEntry {

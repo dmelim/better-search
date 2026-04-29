@@ -148,6 +148,7 @@ const state = {
   openFilter: null,
   hasActivatedSearch: false,
   searchTimer: null,
+  searchRunId: 0,
   isSearching: false,
 };
 
@@ -205,6 +206,7 @@ function init() {
 
   refreshStatus();
   setInterval(refreshStatus, 1800);
+  setInterval(refreshActiveSearch, 700);
   els.search.focus();
   render();
 }
@@ -217,6 +219,14 @@ async function refreshStatus() {
   } catch (error) {
     flash('Could not load scan status.');
   }
+}
+
+function refreshActiveSearch() {
+  if (!state.query || state.status?.state !== 'scanning' || state.isSearching) {
+    return;
+  }
+
+  runSearch();
 }
 
 function onSearchInput(event) {
@@ -335,24 +345,36 @@ async function runSearch() {
     return;
   }
 
+  const runId = state.searchRunId + 1;
+  state.searchRunId = runId;
+  const query = state.query;
+
   state.searchTimer = null;
   state.isSearching = true;
   render();
 
   try {
-    state.results = await SearchEntries({
-      query: state.query,
+    const results = await SearchEntries({
+      query,
       limit: 75,
       typeFilter: state.filters.typeFilter,
       folderPrefix: getEffectiveFolderPrefix(),
       extension: state.filters.extension,
     });
+
+    if (runId !== state.searchRunId || query !== state.query) {
+      return;
+    }
+
+    state.results = results;
     state.selectedIndex = state.results.length ? 0 : -1;
   } catch (error) {
     flash('Search failed.');
   } finally {
-    state.isSearching = false;
-    render();
+    if (runId === state.searchRunId) {
+      state.isSearching = false;
+      render();
+    }
   }
 }
 
@@ -515,13 +537,20 @@ function renderResults() {
   }
 
   if (!state.results.length) {
-    els.resultsNote.textContent = `No matches for "${state.query}"${filterSuffix}`;
+    const isIndexing = state.status?.state === 'scanning';
+    els.resultsNote.textContent = isIndexing
+      ? `Indexing while searching for "${state.query}"${filterSuffix}`
+      : `No matches for "${state.query}"${filterSuffix}`;
     els.results.innerHTML = `
       <div class="empty">
-        <h3 class="empty-title">Nothing useful yet</h3>
+        <h3 class="empty-title">${isIndexing ? 'Indexing' : 'Nothing useful yet'}</h3>
         <p class="empty-copy">${escapeHtml(filterSuffix
-          ? `Try a shorter token, a broader path fragment, or loosen the active filters${filterSuffix}.`
-          : 'Try a shorter token, a broader path fragment, or let the index warm up a little longer.'
+          ? isIndexing
+            ? `New matches will appear here as folders are discovered${filterSuffix}.`
+            : `Try a shorter token, a broader path fragment, or loosen the active filters${filterSuffix}.`
+          : isIndexing
+            ? 'New matches will appear here as folders are discovered.'
+            : 'Try a shorter token, a broader path fragment, or let the index warm up a little longer.'
         )}</p>
       </div>
     `;
